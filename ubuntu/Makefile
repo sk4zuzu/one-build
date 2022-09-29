@@ -1,12 +1,13 @@
 SHELL := $(shell which bash)
 SELF  := $(patsubst %/,%,$(dir $(abspath $(firstword $(MAKEFILE_LIST)))))
 
-ONE_EE   ?= $(realpath $(SELF)/../../one-ee/)
-PACKAGES ?= $(realpath $(SELF)/../../packages/)
+ONE_EE       ?= $(realpath $(SELF)/../../one-ee/)
+ONE_EE_TOOLS ?= $(realpath $(SELF)/../../one-ee-tools/)
+PACKAGES     ?= $(realpath $(SELF)/../../packages/)
 
 D                ?= Ubuntu/20.04
 DISTRO           ?= $(D)
-BUILD_COMPONENTS := fireedge rubygems
+BUILD_COMPONENTS := enterprise fireedge rubygems
 
 ONE_VERSION ?= 6.99.80
 PKG_VERSION ?= 1
@@ -36,8 +37,9 @@ extract: $(CACHE)/opennebula-$(ONE_VERSION)-$(PKG_VERSION)-amd64.tar.gz
 
 $(CACHE)/opennebula-$(ONE_VERSION)-$(PKG_VERSION)-amd64.tar.gz: \
 	$(PACKAGES)/$(call TO_SLUG,$(DISTRO)).sh $(CACHE)/opennebula-$(ONE_VERSION).tar.gz \
-                                             $(CACHE)/java-oca-$(ONE_VERSION).tar.gz \
-                                             $(CACHE)/opennebula-fireedge-modules-$(ONE_VERSION).tar.gz
+	                                         $(CACHE)/java-oca-$(ONE_VERSION).tar.gz \
+	                                         $(CACHE)/opennebula-fireedge-modules-$(ONE_VERSION).tar.gz \
+	                                         $(CACHE)/opennebula-ee-tools-$(ONE_VERSION).tar.gz
 	@rm -f $(HOME)/tar/$(notdir $@) # ideally should have no effect
 	cd $(dir $<) && $(wordlist 1,2,$^) $(PKG_VERSION) $(wordlist 3,$(words $^),$^)
 	@mv $(HOME)/tar/$(notdir $@) $@
@@ -54,6 +56,14 @@ $(CACHE)/opennebula-$(ONE_VERSION).tar.gz: $(ONE_EE)
 	cd $</src/sunstone/public/ && (export PATH=$$PATH:$$PWD/node_modules/.bin && ./build.sh -d && rm -rf ./node_modules/)
 	tar -czf $@ --transform 's:^$(BN):opennebula-$(ONE_VERSION):' -C $(DN) $(BN)
 
+$(CACHE)/java-oca-$(ONE_VERSION).tar.gz: $(ONE_EE) $(CACHE)/apache-xmlrpc-$(APACHE_XMLRPC_VERSION)-bin.tar.gz
+	sudo tar -xzf $(word 2,$^) --skip-old-files -C /usr/share/java/ --strip-components=2 apache-xmlrpc-$(APACHE_XMLRPC_VERSION)/lib/
+	cd $</src/oca/java/ && (./build.sh -p $(ONE_VERSION) && mv $(notdir $@) $@ && rm -f ./jar/*.jar)
+
+$(CACHE)/apache-xmlrpc-$(APACHE_XMLRPC_VERSION)-bin.tar.gz:
+	@install -d $(dir $@)
+	curl -fsSLo $@ https://archive.apache.org/dist/ws/xmlrpc/binaries/$(notdir $@)
+
 $(CACHE)/opennebula-fireedge-modules-$(ONE_VERSION).tar.gz: DN = $(dir $(realpath $<))
 $(CACHE)/opennebula-fireedge-modules-$(ONE_VERSION).tar.gz: BN = $(notdir $(realpath $<))
 $(CACHE)/opennebula-fireedge-modules-$(ONE_VERSION).tar.gz: $(CACHE)/opennebula-fireedge-modules-$(ONE_VERSION)
@@ -66,13 +76,13 @@ $(CACHE)/opennebula-fireedge-modules-$(ONE_VERSION):
 	| sort -u \
 	| xargs -P3 -n1 wget -x -P $@ --no-verbose --retry-connrefused
 
-$(CACHE)/java-oca-$(ONE_VERSION).tar.gz: $(ONE_EE) $(CACHE)/apache-xmlrpc-$(APACHE_XMLRPC_VERSION)-bin.tar.gz
-	sudo tar -xzf $(word 2,$^) --skip-old-files -C /usr/share/java/ --strip-components=2 apache-xmlrpc-$(APACHE_XMLRPC_VERSION)/lib/
-	cd $</src/oca/java/ && (./build.sh -p $(ONE_VERSION) && mv $(notdir $@) $@ && rm -f ./jar/*.jar)
-
-$(CACHE)/apache-xmlrpc-$(APACHE_XMLRPC_VERSION)-bin.tar.gz:
+$(CACHE)/opennebula-ee-tools-$(ONE_VERSION).tar.gz: DN = $(dir $(realpath $<))
+$(CACHE)/opennebula-ee-tools-$(ONE_VERSION).tar.gz: BN = $(notdir $(realpath $<))
+$(CACHE)/opennebula-ee-tools-$(ONE_VERSION).tar.gz: $(ONE_EE_TOOLS)
 	@install -d $(dir $@)
-	curl -fsSLo $@ https://archive.apache.org/dist/ws/xmlrpc/binaries/$(notdir $@)
+	find $< -type f -executable -path '*/vendor/download' -print0 \
+	| xargs -0 --no-run-if-empty -n1 -P1 $(SHELL) -c
+	tar -czf $@ -C $(DN) $(BN)
 
 requirements: PKG := DEBIAN_FRONTEND=noninteractive apt-get install -y
 requirements: GEM := gem install --no-document
